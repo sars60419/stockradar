@@ -1,4 +1,3 @@
-
 name: Update StockRadar Data
 
 on:
@@ -12,13 +11,15 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install pandas numpy requests
-      - run: python scripts/collect_data.py --start "$(date +%Y)-01-01" --end yesterday --out-dir docs/data --config-dir config --cache-dir .cache
+      - name: Run collector - fast first run
+        run: python scripts/collect_data.py --start "$(date -u -d '120 days ago' +%Y-%m-%d)" --end yesterday --out-dir docs/data --config-dir config --cache-dir .cache
       - run: |
           git config user.name "stockradar-bot"
           git config user.email "stockradar-bot@users.noreply.github.com"
