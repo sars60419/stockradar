@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>StockRadar V7</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{--bg:#07111f;--panel:#0e1b2f;--text:#e9f1ff;--muted:#8ea3bf;--line:#203a5f;--accent:#4cc9f0;--good:#3ddc97;--warn:#ffb703;--bad:#ef476f}
+    *{box-sizing:border-box} body{margin:0;font-family:"Microsoft JhengHei","Segoe UI",Arial,sans-serif;background:radial-gradient(circle at top left,#122646 0,#07111f 42%,#040812 100%);color:var(--text)}
+    .app{display:grid;grid-template-columns:290px 1fr;min-height:100vh}.side{border-right:1px solid var(--line);background:rgba(7,17,31,.92);padding:18px;position:sticky;top:0;height:100vh;overflow:auto}
+    .brand{font-size:26px;font-weight:900}.sub{color:var(--muted);font-size:13px;margin:6px 0 16px}.date-btn{border:1px solid var(--line);background:#0b1729;color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer;width:100%;margin-bottom:8px;text-align:left}.date-btn.active{border-color:var(--accent);box-shadow:0 0 0 1px rgba(76,201,240,.2) inset}.date-temp{float:right;color:var(--accent);font-weight:800}
+    .main{padding:22px}.topbar{display:flex;justify-content:space-between;gap:12px;margin-bottom:18px}.title{font-size:30px;font-weight:900}.desc,.status{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{background:linear-gradient(180deg,rgba(18,35,61,.94),rgba(10,22,40,.94));border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 18px 45px rgba(0,0,0,.25)}.card h3{margin:0 0 12px 0;color:#cfe3ff;font-size:16px}
+    .span3{grid-column:span 3}.span5{grid-column:span 5}.span6{grid-column:span 6}.span7{grid-column:span 7}.span12{grid-column:span 12}.kpi{font-size:34px;font-weight:900;line-height:1.1}.kpi small{font-size:14px;color:var(--muted)}
+    .pill{display:inline-flex;padding:6px 10px;border-radius:999px;background:#0a1628;border:1px solid var(--line);font-size:13px;margin-top:10px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+    table{width:100%;border-collapse:collapse;font-size:14px}th,td{border-bottom:1px solid rgba(255,255,255,.08);padding:9px 8px;text-align:left;white-space:nowrap}th{color:var(--muted)}tr:hover td{background:rgba(255,255,255,.03)}tr.clickable{cursor:pointer}
+    .bar{height:8px;background:#081326;border-radius:999px;overflow:hidden;min-width:80px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--good))}.recommend{font-size:17px;line-height:1.7}.recommend b{color:var(--accent)}canvas{max-height:320px}
+    @media(max-width:1100px){.app{grid-template-columns:1fr}.side{height:auto;position:relative}.span3,.span5,.span6,.span7,.span12{grid-column:span 12}}
+  </style>
+</head>
+<body>
+<div class="app"><aside class="side"><div class="brand">StockRadar</div><div class="sub" id="rangeText">讀取中...</div><div id="dateList"></div></aside>
+<main class="main"><div class="topbar"><div><div class="title" id="pageTitle">盤面雷達</div><div class="desc">GitHub Pages 靜態版；每天由 GitHub Actions 自動更新。點股票看收盤價線。</div></div><div class="status">TWSE + TPEx｜上市 + 上櫃｜每天都算</div></div>
+<div class="grid">
+<section class="card span3"><h3>大盤溫度</h3><div class="kpi" id="marketTemp">--</div><div id="marketState" class="pill">--</div></section>
+<section class="card span3"><h3>今日最強族群</h3><div class="kpi" id="topSector">--</div><div class="sub" id="topSectorScore">--</div></section>
+<section class="card span3"><h3>接棒 Momentum</h3><div class="kpi" id="topMomentum">--</div><div class="sub" id="topMomentumScore">--</div></section>
+<section class="card span3"><h3>Top20 新高數</h3><div class="kpi" id="newHighCount">--</div><div class="sub">20日 / 60日新高</div></section>
+<section class="card span7"><h3>每日大盤溫度</h3><canvas id="marketChart"></canvas></section>
+<section class="card span5"><h3>解讀順序</h3><div class="recommend" id="recommendText">--</div></section>
+<section class="card span6"><h3>今日族群排行</h3><table id="sectorTable"></table></section>
+<section class="card span6"><h3>今日接棒排行 Momentum</h3><table id="momentumTable"></table></section>
+<section class="card span7"><h3>今日代表股（點股票看收盤價線）</h3><table id="stockTable"></table></section>
+<section class="card span5"><h3>創新高股票</h3><table id="newHighTable"></table></section>
+<section class="card span12"><h3 id="stockChartTitle">收盤價線</h3><canvas id="stockChart"></canvas></section>
+</div></main></div>
+<script>
+let DATA={},marketChart=null,stockChart=null,currentStocks=[];
+const fmt=(n,d=1)=>(n===null||n===undefined||isNaN(Number(n)))?"--":Number(n).toFixed(d);
+const cls=t=>t>=80?"good":(t>=65?"warn":"bad");
+const bar=v=>`<div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(v)||0))}%"></i></div>`;
+async function j(url){const r=await fetch(url+"?v="+Date.now());return await r.json();}
+async function loadData(){
+  DATA.meta=await j("data/meta.json");DATA.market=await j("data/market.json");DATA.summary=await j("data/summary.json");DATA.sectors=await j("data/sectors.json");DATA.stocks=await j("data/stocks.json");DATA.new_high=await j("data/new_high.json");DATA.price_history=await j("data/price_history.json");
+  DATA.dates=DATA.summary.map(x=>x.date);document.getElementById("rangeText").textContent=`${DATA.meta.start} ~ ${DATA.meta.end}｜${DATA.meta.updated_at}`;
+  renderDateList();renderMarketChart();renderDay(DATA.dates[DATA.dates.length-1]);
+}
+function renderDateList(){const box=document.getElementById("dateList");box.innerHTML="";DATA.dates.forEach(d=>{const s=DATA.summary.find(x=>x.date===d)||{};const b=document.createElement("button");b.className="date-btn";b.id="date-"+d;b.innerHTML=`${d}<span class="date-temp">${fmt(s.market_temperature,0)}</span>`;b.onclick=()=>renderDay(d);box.appendChild(b);});}
+function renderMarketChart(){const labels=DATA.market.map(x=>x.date),temps=DATA.market.map(x=>x.temperature);if(marketChart)marketChart.destroy();marketChart=new Chart(document.getElementById("marketChart"),{type:"line",data:{labels,datasets:[{label:"大盤溫度",data:temps,tension:.25,borderWidth:2,pointRadius:2},{label:"門檻80",data:labels.map(_=>80),borderDash:[6,4],pointRadius:0}]},options:{responsive:true,plugins:{legend:{labels:{color:"#d9e7ff"}}},scales:{x:{ticks:{color:"#8ea3bf",maxRotation:45,minRotation:35},grid:{color:"rgba(255,255,255,.06)"}},y:{min:0,max:100,ticks:{color:"#8ea3bf"},grid:{color:"rgba(255,255,255,.08)"}}}}});}
+function table(id,cols,rows,clicker){let html="<thead><tr>"+cols.map(c=>`<th>${c.name}</th>`).join("")+"</tr></thead><tbody>";rows.forEach((r,i)=>{html+=`<tr ${clicker?'class="clickable" onclick="'+clicker+'('+i+')"':''}>`+cols.map(c=>`<td>${c.render?c.render(r):(r[c.key]??"")}</td>`).join("")+"</tr>";});document.getElementById(id).innerHTML=html+"</tbody>";}
+function renderDay(d){
+ document.querySelectorAll(".date-btn").forEach(x=>x.classList.remove("active"));const a=document.getElementById("date-"+d);if(a)a.classList.add("active");
+ const sum=DATA.summary.find(x=>x.date===d)||{},sectors=DATA.sectors.filter(x=>x.date===d).sort((a,b)=>b.score-a.score),moms=DATA.sectors.filter(x=>x.date===d).sort((a,b)=>b.momentum-a.momentum),stocks=DATA.stocks.filter(x=>x.date===d).sort((a,b)=>b.score-a.score),highs=DATA.new_high.filter(x=>x.date===d);
+ currentStocks=stocks.slice(0,12);const temp=Number(sum.market_temperature||0),topS=sectors[0]||{},topM=moms[0]||{};
+ document.getElementById("pageTitle").textContent=`盤面雷達 ${d}`;document.getElementById("marketTemp").innerHTML=`${fmt(temp,0)}<small> /100</small>`;document.getElementById("marketState").className="pill "+cls(temp);document.getElementById("marketState").textContent=temp>=80?"值得研究":(temp>=65?"觀察":"保守");
+ document.getElementById("topSector").textContent=topS.sector||"--";document.getElementById("topSectorScore").textContent=`分數 ${fmt(topS.score,1)}｜新高 ${topS.high20_count||0}/${topS.high60_count||0}`;
+ document.getElementById("topMomentum").textContent=topM.sector||"--";document.getElementById("topMomentumScore").innerHTML=`Δ <span class="${Number(topM.momentum||0)>=0?'good':'bad'}">${fmt(topM.momentum,1)}</span>`;
+ document.getElementById("newHighCount").innerHTML=`${highs.length}<small> 檔</small>`;
+ document.getElementById("recommendText").innerHTML=`1. 先看大盤溫度：<b>${fmt(temp,0)}</b>。<br>2. 看接棒族群：<b>${topM.sector||"--"}</b>，Momentum <b>${fmt(topM.momentum,1)}</b>。<br>3. 看新高家數：${highs.length} 檔。<br>4. 再看代表股「個股溫度 + 收盤價線」，找提前布局，不是追已大漲。`;
+ table("sectorTable",[{name:"族群",key:"sector"},{name:"分數",render:r=>fmt(r.score,1)},{name:"均溫",render:r=>fmt(r.avg_stock_temperature,0)},{name:"新高",render:r=>`${r.high20_count||0}/${r.high60_count||0}`},{name:"檔數",key:"stock_count"},{name:"強度",render:r=>bar(r.score)}],sectors.slice(0,10));
+ table("momentumTable",[{name:"族群",key:"sector"},{name:"Momentum",render:r=>`<span class="${Number(r.momentum)>=0?'good':'bad'}">${fmt(r.momentum,1)}</span>`},{name:"分數",render:r=>fmt(r.score,1)},{name:"新高",render:r=>`${r.high20_count||0}/${r.high60_count||0}`}],moms.slice(0,10));
+ table("stockTable",[{name:"股票",render:r=>`${r.stock_id} ${r.stock_name}`},{name:"市場",key:"exchange"},{name:"族群",key:"sector"},{name:"個股溫度",render:r=>fmt(r.stock_temperature,0)},{name:"分數",render:r=>fmt(r.score,1)},{name:"排名",key:"rank"},{name:"新高",render:r=>(r.is_20d_high||r.is_60d_high)?`<span class="good">Y</span>`:""}],currentStocks,"showStock");
+ table("newHighTable",[{name:"股票",render:r=>`${r.stock_id} ${r.stock_name}`},{name:"市場",key:"exchange"},{name:"族群",key:"sector"},{name:"排名",key:"rank"},{name:"20/60",render:r=>`${r.is_20d_high?'20':''}${r.is_60d_high?'/60':''}`}],highs.slice(0,14));
+ if(currentStocks.length)showStock(0);
+}
+function showStock(i){const s=currentStocks[i];if(!s)return;const hist=DATA.price_history.filter(x=>x.stock_id===s.stock_id).sort((a,b)=>a.date.localeCompare(b.date));const labels=hist.map(x=>x.date),close=hist.map(x=>x.close);document.getElementById("stockChartTitle").textContent=`${s.stock_id} ${s.stock_name} 收盤價線`;if(stockChart)stockChart.destroy();stockChart=new Chart(document.getElementById("stockChart"),{type:"line",data:{labels,datasets:[{label:"收盤價",data:close,tension:.2,borderWidth:2,pointRadius:1}]},options:{responsive:true,plugins:{legend:{labels:{color:"#d9e7ff"}}},scales:{x:{ticks:{color:"#8ea3bf",maxRotation:45,minRotation:35},grid:{color:"rgba(255,255,255,.06)"}},y:{ticks:{color:"#8ea3bf"},grid:{color:"rgba(255,255,255,.08)"}}}}});}
+loadData();
+</script>
+</body>
+</html>
